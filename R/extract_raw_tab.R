@@ -31,7 +31,12 @@ example = function() {
   tab.df = res$tabs.df
 }
 
-extract_tables_from_text = function(txt = readLines(file), file=NULL) {
+# At some point need to rename to:
+#
+# extract_raw_tables_from_text
+#
+# but currently still keep name for compatibility reasons
+extract_tables_from_text = extract_raw_tables_from_text = function(txt = readLines(file), file=NULL) {
   restore.point("extract_tables_from_text")
 
   txt = stri_replace_all_regex(txt,"[−–]","-")

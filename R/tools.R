@@ -1,3 +1,31 @@
+from_to = function(from, to, min=from, max=to) {
+  from = max(from, min)
+  to = min(to, max)
+  if (from > to) return(NULL)
+  from:to
+}
+
+tabtitle_to_tabid = function(tabtitle) {
+  tabname_to_tabid(tabtitle)
+}
+
+tabname_to_tabid = function(tabname) {
+  restore.point("tabname_to_tabid")
+  tabid = str.right.of(tabname, "able ") %>% trimws()
+  tabid = gsub("\\.$","",tabid) %>% trimws()
+
+  rows = which(startsWith(tolower(tabname),"appendix"))
+  tabid[rows] = paste0("app.",tabid[rows])
+
+  # Update: remove spaces and other special letter
+  # We will later use tabid inside HTML ids: so it should
+  # not have any special symbols anymore
+  tabid = stringi::stri_replace_all_regex(tabid, "[^a-zA-Z0-9_]","")
+  tabid = stringi::stri_replace_all_fixed(tabid, "TABLE","")
+  tabid
+}
+
+
 has.substr = function (str, pattern) {
   stri_detect_fixed(str, pattern)
 }
@@ -9,6 +37,18 @@ loc_sep_lines = function(txt, loc, start_col = "start", end_col="end", line_col=
   loc[[line_col]] = findInterval(loc$start, lines_start)
   loc[[start_col]] = loc$start-lines_start[loc[[line_col]]]+1
   loc[[end_col]] = loc$end-lines_start[loc[[line_col]]]+1
+  loc
+
+
+}
+
+loc_sep_lines2 = function(txt, loc) {
+  restore.point("loc_sep_lines")
+  lines_loc = stri_locate_all_fixed(txt, "\n")[[1]]
+  lines_start = c(1, lines_loc[,1]+1)
+  loc$row = findInterval(loc$start, lines_start)
+  loc$col_start = loc$start-lines_start[loc$row]+1
+  loc$col_end = loc$end-lines_start[loc$row]+1
   loc
 
 
@@ -112,5 +152,44 @@ ends.with.text = function(txt, end.size=4) {
   rhs = substring(str, nchar(str)-end.size,nchar(str))
   grepl("[a-zA-z]",rhs,fixed=FALSE)
 
+}
+
+seq_rows = function(x) {
+  seq_len(NROW(x))
+}
+
+combine_text_lines = function(txt, remove.line.end.hyphen = TRUE, replace.line.breaks=TRUE, remove_repeated_ws = TRUE) {
+  restore.point("combine_text_lines")
+  txt = merge.lines(txt)
+  if (remove.line.end.hyphen) {
+    if (replace.line.breaks) {
+      txt = stri_replace_all_fixed(txt, "-\n","")
+    } else {
+      txt = stri_replace_all_fixed(txt, "-\n","\n")
+    }
+  }
+  if (replace.line.breaks) {
+    # Replace line breaks that are not followed by a space or another line break
+    # This means we only want to keep line breaks for likely paragraph breaks.
+    txt = stri_replace_all_regex(txt, "\n(?![ \n])"," ")
+
+    # Also replace line breaks if last letter in previous line was
+    # a simple lower case character. Then we don't have a finished sentence
+    # and no new paragraph should start
+    txt = stri_replace_all_regex(txt, "(?<=[a-z])\n"," ")
+  }
+  if (remove_repeated_ws) {
+    txt = stri_replace_all_regex(txt,"[ ]+"," ")
+  }
+
+  txt
+}
+
+left_join_overlap = function (x, y, by_x, by_y, mult = "all", type = "any", nomatch = NA) {
+  dt_x = as.data.table(x)
+  dt_y = as.data.table(y, key = by_y)
+  dt_ol = foverlaps(dt_x, dt_y, mult = mult, type = type, which = FALSE,
+                    by.x = by_x)
+  as_tibble(dt_ol)
 }
 

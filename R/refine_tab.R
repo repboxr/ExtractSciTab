@@ -18,21 +18,38 @@ example = function() {
   file = "~/articles_txt2/restat_100_1_10.txt"
   txt = readLines(file, warn=FALSE)
 
+  project_dir = "/home/rstudio/repbox/projects_gha/restud_86_2_1"
+
+  txt = readLines(paste0(project_dir,"/art/art.txt"))
+  raw = extract_raw_tables_from_text(txt = txt)
+
+  tab_df = refine_raw_tab(raw)
+
+  rstudioapi::filesPaneNavigate(project_dir)
+  tp_df = readRDS(paste0(project_dir,"/art/art_tab_raw.Rds"))
+
 }
 
-refine_raw_art_tab = function()
 
 extract_tables_from_art_text = function(txt) {
   txt = merge.lines(txt)
-  res = extract_raw_tables_from_text(txt = txt)
-  tp_df = res$tabs.df
+  raw = extract_raw_tables_from_text(txt = txt)
+
+  refine_raw_art_tab(raw)
+}
+
+refine_raw_tab = function(raw) {
+  restore.point("refine_raw_tp_df")
+  tp_df = raw$tabs.df
+  txt   = raw$txt
+
   if (NROW(tp_df)==0) return(NULL)
 
 
   names(tp_df) = gsub(".","_", names(tp_df), fixed=TRUE)
 
   colnames(tp_df)
-  cols = union(c("tabid", "tpid","tabname","tpname","table_title","start_line","end_line"), colnames(tp_df))
+  cols = union(c("tabid", "tpid","tabname","tpname","tabtitle","start_line","end_line"), colnames(tp_df))
   tp_df = tp_df[,cols]
 
 
@@ -60,15 +77,40 @@ extract_tables_from_art_text = function(txt) {
   }
 
   tp_df = tp_df %>%
-    rename(tabtitle = table_title, tptitle = panel_title)
+    rename(tptitle = panel_title)
+
+  # tp_df can contain text parts that are wrongly identified as tables
+  # For every part try to determine the best.
+  tp_df = tp_df %>%
+    mutate(
+      pad_tabid = pad_tabid(tabid),
+      chunk_ind = cumsum(!is.true(lag(tabid) == tabid))
+    )
+
+  chunk_df = tp_df %>%
+    group_by(chunk_ind, tabid, pad_tabid) %>%
+    summarize(
+      num_lines = max(end_line)-min(start_line)+1
+    ) %>%
+    ungroup() %>%
+    mutate(
+      prev_bigger = is.true(lag(pad_tabid)>pad_tabid),
+      next_smaller = is.true(lead(pad_tabid)<pad_tabid)
+    )
+  keep_chunk_df = chunk_df %>%
+    group_by(tabid) %>%
+    arrange(desc(num_lines), prev_bigger+next_smaller) %>%
+    slice(1)
+
+  tp_df = semi_join(tp_df, keep_chunk_df, by = "chunk_ind")
 
 
   tab_df = tp_df %>%
     group_by(tabid) %>%
     summarize(
-      start_line = min(c(start_line, table_title_line),na.rm = TRUE),
+      start_line = min(c(start_line, tabtitle_line),na.rm = TRUE),
       end_line = max(c(end_line),na.rm=TRUE),
-      title_line = min(table_title_line, na.rm=TRUE)
+      title_line = min(tabtitle_line, na.rm=TRUE)
     )
 
   sep_txt = sep.lines(txt)
@@ -90,7 +132,7 @@ extract_tables_from_art_text = function(txt) {
 
   i = 1
   for (i in seq_rows(tab_parts)) {
-    res = pdf_tab_cell_row_panel_df(tab_parts[i,],tp_df[tp_df$tabid==tab_parts$tabid[[i]],])
+    res = make_tab_cell_row_panel_df(tab_parts[i,],tp_df[tp_df$tabid==tab_parts$tabid[[i]],])
     tab_parts$cell_df[[i]] = res$cell_df
     tab_parts$row_df[[i]] = res$row_df
     tab_parts$panel_df[[i]] = res$panel_df
@@ -100,11 +142,12 @@ extract_tables_from_art_text = function(txt) {
 
   table_df = left_join(tab_parts,tab_df, by = "tabid")
   table_df = table_df[, setdiff(names(table_df),c("start_page"))]
+  table_df$pad_tabid = pad_tabid(table_df$tabid)
   table_df
 }
 
-cell_df_to_tabhtml = function(cell_df) {
 
+cell_df_to_tabhtml = function(cell_df) {
   tr_df = cell_df %>%
     group_by(row) %>%
     summarize(
@@ -118,11 +161,11 @@ cell_df_to_tabhtml = function(cell_df) {
 }
 
 
-# Create cell_df for Table from PDF
+# Create cell_df from tp_df
 # tp_df has extracted numbers, but we want to recreate
 # as close as possible also the text cells
-pdf_tab_cell_row_panel_df = function(tab, tp_df) {
-  restore.point("make_pdf_tab_cell_row_df")
+make_tab_cell_row_panel_df = function(tab, tp_df) {
+  restore.point("make_tab_cell_row_df")
   #if (tab$tabid=="2") stop()
 
 
@@ -261,7 +304,7 @@ tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=1) {
   #if (tp$tabid=="3") stop()
   loc_df = tp$loc_df[[1]] %>%
     filter(type == "num") %>%
-    mutate(row = line-tp$table_title_line)
+    mutate(row = line-tp$tabtitle_line)
 
   loc_df = loc_df %>%
     rename(num_str = num.str, num = num.val) %>%
@@ -360,8 +403,8 @@ tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=1) {
     group_by(row, col) %>%
     summarize(
       str = paste0(str, collapse=" "),
-      start = min(start),
-      end = max(end),
+      start = suppressWarnings(min(start)),
+      end = suppressWarnings(max(end)),
       colspan = 1
     ) %>%
     ungroup()
@@ -729,4 +772,12 @@ line_df_extract_table_parts = function(line_df) {
   tab_parts$tab_counter = seq_rows(tab_parts)
   tab_parts
 }
+
+pad_tabid = function(tabid) {
+  #num = as.numeric(stri_extract_first_regex(tabid, "[0-9]+[.0-9]*"))
+  #prefix = stri_extract_first_regex(tabid, "^[a-zA-Z]") %>% na.val("")
+  stringi::stri_pad_left(tabid, width=max(nchar(tabid)),pad = "0")
+
+}
+
 

@@ -512,16 +512,16 @@ create.tabs.df = function(txt, loc.df) {
   tabs.df$prev.end.line = lead(tabs.df$end.line, default=NA)
   tabs.df$next.start.line = lag(tabs.df$start.line, default=NA)
 
-  title.df = bind_rows(lapply(tabs, function(tab.num) extract.table.title(tabs.df[tab.num,], txt)))
+  title.df = bind_rows(lapply(tabs, function(tab.num) extract.tabtitle(tabs.df[tab.num,], txt)))
   tabs.df = bind_cols(tabs.df, title.df)
 
   tabs.df = add.groups.and.panels.to.tabs.df(tabs.df)
 
   tabs.df = tabs.df %>% mutate(tabfig = case_when(
-    !is.na(table.title) & is.na(figure.title) ~ "tab",
-    is.na(table.title) & !is.na(figure.title) ~ "fig",
-    !is.na(table.title) & !is.na(figure.title) &
-      table.title.space.left > 1 & figure.title.space.left <= 1 ~ "table",
+    !is.na(tabtitle) & is.na(figtitle) ~ "tab",
+    is.na(tabtitle) & !is.na(figtitle) ~ "fig",
+    !is.na(tabtitle) & !is.na(figtitle) &
+      tabtitle.space.left > 1 & figtitle.space.left <= 1 ~ "table",
     TRUE ~ "unknown"
   ))
 
@@ -535,8 +535,8 @@ create.tabs.df = function(txt, loc.df) {
   }
   tabs.df = tabs.df %>% mutate(
     tabname = ifelse(tabfig!="fig",
-      extract.tabname(table.title, tabid),
-      extract.figname(figure.title, tabid)
+      extract.tabname(tabtitle, tabid),
+      extract.figname(figtitle, tabid)
     ),
     tpname = ifelse(num.panel > 1,
       paste0(tabname,"-",panel.index(panel)),
@@ -559,9 +559,9 @@ add.groups.and.panels.to.tabs.df = function(tabs.df) {
 
   tabs.df = tabs.df %>%
     mutate(merge.with.above =
-      is.true(lag(table.title.line)==table.title.line) |
-      is.true(lag(figure.title.line)==figure.title.line) |
-      (is.na(table.title.line) & is.na(lag(figure.title.line)) & (start.line-lag(end.line) <= merge.dist))
+      is.true(lag(tabtitle.line)==tabtitle.line) |
+      is.true(lag(figtitle.line)==figtitle.line) |
+      (is.na(tabtitle.line) & is.na(lag(figtitle.line)) & (start.line-lag(end.line) <= merge.dist))
     ) %>%
     mutate(
       merge.with.above = ifelse(is.na(merge.with.above),FALSE, merge.with.above)) %>%
@@ -572,8 +572,8 @@ add.groups.and.panels.to.tabs.df = function(tabs.df) {
     mutate(
       num.panel = n(),
       panel = 1:n(),
-      across(table.title.line:table.title.space.left, first.non.na),
-      across(figure.title.line:figure.title.space.left, first.non.na)
+      across(tabtitle.line:tabtitle.space.left, first.non.na),
+      across(figtitle.line:figtitle.space.left, first.non.na)
     ) %>%
     ungroup()
   tabs.df
@@ -595,8 +595,8 @@ extract.figname = function(title, tabid) {
 }
 
 
-extract.table.title = function(tab,txt) {
-  restore.point("extract.table.title")
+extract.tabtitle = function(tab,txt) {
+  restore.point("extract.tabtitle")
   #if (tab$tpid==31) stop()
   # Analyse table title
   end.line = pmax(tab$start.line-1,1)
@@ -624,39 +624,39 @@ extract.table.title = function(tab,txt) {
     startsWith(ttxt,"Table") | startsWith(ttxt,"TABLE ") |
     (has.space & (has.substr(ttxt,"Table ") | has.substr(ttxt,"TABLE ")))
   )
-  table.title.line = get.line(rows, lines)
+  tabtitle.line = get.line(rows, lines)
 
   rows = which(startsWith(ttxt,"Panel ") | startsWith(ttxt,"PANEL "))
   panel.title.line = get.line(rows, lines)
-  if (isTRUE(panel.title.line < table.title.line))
+  if (isTRUE(panel.title.line < tabtitle.line))
     panel.title.line = NA_integer_
 
   rows = which(startsWith(ttxt,"Figure ") | startsWith(ttxt,"FIGURE "))
   figure.above.title.line = get.line(rows, lines)
-  if (isTRUE(figure.above.title.line < table.title.line))
+  if (isTRUE(figure.above.title.line < tabtitle.line))
     figure.above.title.line = NA_integer_
 
   # Search for Figure title below
   lines = tab$end.line:(tab$end.line+10)
   ttxt = trimws(txt[lines])
   rows = which(startsWith(ttxt,"Figure ") | startsWith(ttxt,"FIGURE "))
-  figure.title.line = get.line(rev(rows), lines)
+  figtitle.line = get.line(rev(rows), lines)
 
   res = tibble(
-    table.title.line = table.title.line,
-    table.title = get.txt(table.title.line),
-    table.title.above = tab$start.line-table.title.line,
-    table.title.space.left = get.space.left(table.title.line),
+    tabtitle.line = tabtitle.line,
+    tabtitle = get.txt(tabtitle.line),
+    tabtitle.above = tab$start.line-tabtitle.line,
+    tabtitle.space.left = get.space.left(tabtitle.line),
 
     panel.title.line = panel.title.line,
     panel.title = get.txt(panel.title.line),
     panel.title.above = tab$start.line-panel.title.line,
 
 
-    figure.title.line = figure.title.line,
-    figure.title = get.txt(figure.title.line),
-    figure.title.below = figure.title.line-tab$end.line,
-    figure.title.space.left = get.space.left(figure.title.line),
+    figtitle.line = figtitle.line,
+    figtitle = get.txt(figtitle.line),
+    figtitle.below = figtitle.line-tab$end.line,
+    figtitle.space.left = get.space.left(figtitle.line),
 
     figure.above.title.line = figure.above.title.line,
     figure.above.title = get.txt(figure.above.title.line),
@@ -770,7 +770,7 @@ add.tabs.source.start.end.lines = function(tabs.df, txt, add.above=5, add.below=
   min.lines = sapply(tabs.df$loc.df, function(tloc.df) min(tloc.df$line))
   max.lines = sapply(tabs.df$loc.df, function(tloc.df) max(tloc.df$line))
 
-  title.lines = na.val(tabs.df$table.title.line, Inf)
+  title.lines = na.val(tabs.df$tabtitle.line, Inf)
 
   start.lines = pmax(1,min.lines-add.above) %>% pmin(title.lines)
 

@@ -20,10 +20,23 @@ example = function() {
 
   project_dir = "/home/rstudio/repbox/projects_gha/restud_86_2_1"
 
-  txt = readLines(paste0(project_dir,"/art/art.txt"))
+
+  page = 25
+
+
+  page_df = readRDS(file.path(project_dir,"art/txt_pages.Rds"))
+
+  txt = page_df$txt[page_df$page==25]
+  #txt = paste0(page_df$txt, collapse="\n")
+  #txt = readLines(paste0(project_dir,"/art/art.txt"))
   raw = extract_raw_tables_from_text(txt = txt)
 
   tab_df = refine_raw_tab(raw)
+
+  html = tab_df$tab_html[[which(tab_df$tabid=="5")]]
+  writeLines(html, "~/repbox/temp/table.html")
+
+  browseURL("~/repbox/temp/table.html")
 
   rstudioapi::filesPaneNavigate(project_dir)
   tp_df = readRDS(paste0(project_dir,"/art/art_tab_raw.Rds"))
@@ -38,7 +51,7 @@ extract_tables_from_art_text = function(txt) {
   refine_raw_art_tab(raw)
 }
 
-refine_raw_tab = function(raw) {
+refine_raw_tab = function(raw, page_df=NULL) {
   restore.point("refine_raw_tp_df")
   tp_df = raw$tabs.df
   txt   = raw$txt
@@ -84,7 +97,11 @@ refine_raw_tab = function(raw) {
   tp_df = tp_df %>%
     mutate(
       pad_tabid = pad_tabid(tabid),
-      chunk_ind = cumsum(!is.true(lag(tabid) == tabid))
+      #chunk_ind = cumsum(!is.true(lag(tabid) == tabid))
+
+      # also conditioning on tabname better rules out some text chunks
+      # referring to the table
+      chunk_ind = cumsum(!is.true(lag(tabid) == tabid & lag(tabname)==tabname))
     )
 
   chunk_df = tp_df %>%
@@ -105,6 +122,16 @@ refine_raw_tab = function(raw) {
   tp_df = semi_join(tp_df, keep_chunk_df, by = "chunk_ind")
 
 
+  # In the moment, we will ignore table parts that continue on later pages
+  # often these are false positives or inbetween there is still text.
+  # Better code would identify them
+
+  # tp_df = tp_df %>%
+  #   group_by(tabid) %>%
+  #   mutate(same_page = start_page == first(start_page)) %>%
+  #   filter(same_page)
+
+
   tab_df = tp_df %>%
     group_by(tabid) %>%
     summarize(
@@ -112,6 +139,23 @@ refine_raw_tab = function(raw) {
       end_line = max(c(end_line),na.rm=TRUE),
       title_line = min(tabtitle_line, na.rm=TRUE)
     )
+
+  # NEW: Merge tp_df for each tab and
+  #      compute columns again
+  tp_df = tp_df %>%
+    group_by(tabid, pad_tabid) %>%
+    summarize(
+      tpid = first(tpid),
+      panel_title = "",
+      tptitle = first(tptitle),
+      tpname = first(tpname),
+      tabtitle_line = first(tabtitle_line),
+      start_line = min(c(start_line, tabtitle_line),na.rm = TRUE),
+      end_line = max(c(end_line),na.rm=TRUE),
+      title_line = min(tabtitle_line, na.rm=TRUE),
+      loc_df = list(merge_loc_df(loc_df))
+    )
+
 
   sep_txt = sep.lines(txt)
   line_df = tibble(line=seq_along(sep_txt), txt=sep_txt, trim_txt = trimws(sep_txt), keep=TRUE, type = "", page = 1, tabid="",footind=0) %>%
@@ -146,13 +190,25 @@ refine_raw_tab = function(raw) {
   table_df
 }
 
+merge_loc_df = function(loc_df_li) {
+  restore.point("merge_loc_df")
+  loc_df = bind_rows(loc_df_li)
+  loc_df$org_tpid = loc_df$tpid
+  loc_df$tpid = first(loc_df$tpid)
+  new_loc_df = add.tab.cols(loc_df)
+  new_loc_df$tpid = new_loc_df$org_tpid
+  new_loc_df$max.col = max(new_loc_df$col)
+  new_loc_df
+}
 
 cell_df_to_tabhtml = function(cell_df) {
   tr_df = cell_df %>%
     group_by(row) %>%
     summarize(
       html = paste0('<tr data-row="', first(row),'">\n',
-        paste0('  <td data-row="', row,'" data-col="',col,'">',text, "</td>", collapse = "\n"),
+        paste0('  <td data-row="', row,'" data-col="',col,'"',
+               ifelse(is.true(colspan>1),paste0('colspan="', colspan,'"'), ''),
+               '>',text, "</td>", collapse = "\n"),
         '\n</tr>'
       )
     )

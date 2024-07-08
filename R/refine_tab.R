@@ -15,14 +15,7 @@
 
 example = function() {
   library(ExtractSciTab)
-  file = "~/articles_txt2/restat_100_1_10.txt"
-  txt = readLines(file, warn=FALSE)
-
   project_dir = "/home/rstudio/repbox/projects_gha/restud_86_2_1"
-
-
-  page = 25
-
 
   page_df = readRDS(file.path(project_dir,"art/txt_pages.Rds"))
 
@@ -33,7 +26,10 @@ example = function() {
 
   tab_df = refine_raw_tab(raw)
 
+  cell_df = tab_df$cell_df[[1]]
   html = tab_df$tab_html[[which(tab_df$tabid=="5")]]
+
+  repboxArt::show_cell_df_html(tab_df$cell_df[[1]],color_by = "col")
   writeLines(html, "~/repbox/temp/table.html")
 
   browseURL("~/repbox/temp/table.html")
@@ -176,13 +172,13 @@ refine_raw_tab = function(raw, page_df=NULL) {
 
   i = 1
   for (i in seq_rows(tab_parts)) {
-    res = make_tab_cell_row_panel_df(tab_parts[i,],tp_df[tp_df$tabid==tab_parts$tabid[[i]],])
-    tab_parts$cell_df[[i]] = res$cell_df
-    tab_parts$row_df[[i]] = res$row_df
-    tab_parts$panel_df[[i]] = res$panel_df
+    cell_df = make_tab_cell_df(tab_parts[i,],tp_df[tp_df$tabid==tab_parts$tabid[[i]],])
+    tab_parts$cell_df[[i]] = cell_df
+    #tab_parts$row_df[[i]] = res$row_df
+    #tab_parts$panel_df[[i]] = res$panel_df
   }
 
-  tab_parts$tab_html = sapply(tab_parts$cell_df, cell_df_to_tabhtml)
+  tab_parts$tab_html = sapply(tab_parts$cell_df, convert_cell_df_to_tabhtml)
 
   table_df = left_join(tab_parts,tab_df, by = "tabid")
   table_df = table_df[, setdiff(names(table_df),c("start_page"))]
@@ -193,15 +189,17 @@ refine_raw_tab = function(raw, page_df=NULL) {
 merge_loc_df = function(loc_df_li) {
   restore.point("merge_loc_df")
   loc_df = bind_rows(loc_df_li)
-  loc_df$org_tpid = loc_df$tpid
+  #loc_df$org_tpid = loc_df$tpid
   loc_df$tpid = first(loc_df$tpid)
-  new_loc_df = add.tab.cols(loc_df)
-  new_loc_df$tpid = new_loc_df$org_tpid
-  new_loc_df$max.col = max(new_loc_df$col)
-  new_loc_df
+  if (length(loc_df_li)>1) {
+    loc_df = add.tab.cols(loc_df)
+  }
+  loc_df$max.col = max(loc_df$col)
+  loc_df
 }
 
-cell_df_to_tabhtml = function(cell_df) {
+
+convert_cell_df_to_tabhtml = function(cell_df) {
   tr_df = cell_df %>%
     group_by(row) %>%
     summarize(
@@ -220,9 +218,9 @@ cell_df_to_tabhtml = function(cell_df) {
 # Create cell_df from tp_df
 # tp_df has extracted numbers, but we want to recreate
 # as close as possible also the text cells
-make_tab_cell_row_panel_df = function(tab, tp_df) {
-  restore.point("make_tab_cell_row_df")
-  #if (tab$tabid=="2") stop()
+make_tab_cell_df = function(tab, tp_df) {
+  restore.point("make_tab_cel_df")
+  #if (tab$tabid=="3") stop()
 
 
   txt = tab$tabsource %>%
@@ -248,6 +246,8 @@ make_tab_cell_row_panel_df = function(tab, tp_df) {
   i = 1
   skipped = FALSE
   for (i in seq_len(NROW(tp_df))) {
+
+
     res = tp_to_cell_df(tp_df[i,], word_loc,add_words_below = (i==NROW(tp_df)),panel_num = i)
     cell_df = res$cell_df
 
@@ -314,48 +314,62 @@ make_tab_cell_row_panel_df = function(tab, tp_df) {
     cell_df = cell_df[-rows,]
   }
 
+  cell_df = cell_df %>%
+    arrange(row, col) %>%
+    group_by(row) %>%
+    mutate(
+      colspan=case_when(
+        is.na(lead(col)) ~ max.col-col+1,
+        TRUE ~ pmax(1,lead(col)-col)
+      )
+    )
+
+
 
   cell_df = cell_df %>%
     mutate(
       is_int_header = type == "num" & num_deci==0 & paren_type=="("
     )
 
-  row_df = cell_df %>%
-    group_by(row) %>%
-    summarise(
-      is_int_header_block = sum(is_int_header)>0 & sum(!is_int_header==0),
-      is_empty_row = all(type=="empty"),
-      is_num_row = any(type=="num"),
-      rowname = case_when(
-        first(type)== "text" ~ first(text),
-        first(type)=="empty" & nth(type,2,default="") == "text" ~ nth(text,2),
-        TRUE ~ ""
-      ),
-      panel_num = first(panel_num)
-    ) %>%
-    ungroup() %>%
-    mutate(
-      .new_panel_num = !is.true(lag(panel_num)==panel_num),
-      .new_num_block = !is.true(lag(is_num_row) | !.new_panel_num),
-      num_row_block = cumsum(.new_num_block)*is_num_row
-    ) %>%
-    select(-.new_panel_num, -.new_num_block)
+  return(cell_df)
 
-  panel_df = tp_df %>%
-    transmute(panel_title=ifelse(is.na(tptitle), tpname, tptitle), panel_num=seq_len(n()))
+  # row_df = cell_df %>%
+  #   group_by(row) %>%
+  #   summarise(
+  #     is_int_header_block = sum(is_int_header)>0 & sum(!is_int_header==0),
+  #     is_empty_row = all(type=="empty"),
+  #     is_num_row = any(type=="num"),
+  #     rowname = case_when(
+  #       first(type)== "text" ~ first(text),
+  #       first(type)=="empty" & nth(type,2,default="") == "text" ~ nth(text,2),
+  #       TRUE ~ ""
+  #     ),
+  #     panel_num = first(panel_num)
+  #   ) %>%
+  #   ungroup() %>%
+  #   mutate(
+  #     .new_panel_num = !is.true(lag(panel_num)==panel_num),
+  #     .new_num_block = !is.true(lag(is_num_row) | !.new_panel_num),
+  #     num_row_block = cumsum(.new_num_block)*is_num_row
+  #   ) %>%
+  #   select(-.new_panel_num, -.new_num_block)
+  #
+  # panel_df = tp_df %>%
+  #   transmute(panel_title=ifelse(is.na(tptitle), tpname, tptitle), panel_num=seq_len(n()))
+  #
+  # cell_df = left_join(cell_df, select(row_df, row, num_row_block), by="row")
+  # list(cell_df=cell_df, row_df=row_df, panel_df=panel_df)
 
-  cell_df = left_join(cell_df, select(row_df, row, num_row_block), by="row")
 
-  list(cell_df=cell_df, row_df=row_df, panel_df=panel_df)
 }
 
 
-# ExtractSciTab did not add text cells properly
-# this function does so. On the other hand the column
+# The raw extraction in ExtractSciTab did not add text cells properly
+# this function does so. On the other hand, the original column
 # detection of ExtractSciTab for num cells is relatively
 # sophisticated (works also with slightly missarranged columns)
 # So we want to reuse their column positions
-tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=1) {
+tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=0) {
   restore.point("tp_to_cell_df")
   #if (tp$tabid=="3") stop()
   loc_df = tp$loc_df[[1]] %>%
@@ -376,6 +390,9 @@ tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=1) {
     mutate(
       is_int_header = n() > 1 & all(paren_type == "(" & num_deci == 0) & all(diff(num)==1)
     )
+
+  # Newly introduced: need to check
+  loc_df = split_multi_cell_cols(loc_df)
 
   loc_df = repair_slipped_cols(loc_df)
   loc_df = repair_same_col_cells(loc_df)
@@ -490,7 +507,14 @@ tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=1) {
   cell_df = cell_df %>%
     rename(text = str)
 
+  # If there are cells with same row and col remaining, ensure that
+  # they are separated
+  cell_df = split_multi_cell_cols(cell_df,sep_all = TRUE)
+  cell_df = merge_single_neg_int_cols(cell_df)
+
+
   cell_df$type[is.true(cell_df$is_int_header)] = "text"
+
 
   # Try to detect numbers that are only part of the header and say that
   # they are text. We may loose with small probability some number,
@@ -511,9 +535,92 @@ tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=1) {
 
   cell_df$panel_num = panel_num
 
+
+  # Finally arrange by row and col and adapt colspan
+  cell_df = cell_df %>%
+    arrange(row, col) %>%
+    group_by(row) %>%
+    mutate(
+      colspan=case_when(
+        is.na(lead(col)) ~ max.col-col+1,
+        TRUE ~ pmax(1,lead(col)-col)
+      )
+    )
+
+
   list(cell_df=cell_df, word_below = words_below)
 }
 
+
+split_multi_cell_cols = function(loc_df, sep_all=FALSE) {
+  restore.point("split_mulit_cell_cols")
+  if (!"was_split" %in% names(loc_df))
+    loc_df$was_split= rep(FALSE, NROW(loc_df))
+
+  loc_df = loc_df %>%
+    group_by(row, col) %>%
+    mutate(
+      num_in_cell = n(),
+      in_cell_pos = 1:n(),
+      need_sep = num_in_cell > 1 & (sep_all | (type=="num" & is.true(num_deci>0))),
+      need_sep_num = ifelse(sum(need_sep)==0, 0,num_in_cell)
+    )
+  rows = loc_df$num_in_cell > 1
+  loc_df$was_split[rows] = TRUE
+
+  col_df = loc_df %>%
+    group_by(col) %>%
+    summarize(
+      sep_num = max(need_sep_num)
+    )
+
+  split_cols = sort(col_df$col[col_df$sep_num>1], decreasing=TRUE)
+
+  for (.col in split_cols) {
+    rows = loc_df$col > .col
+    loc_df$col[rows] = loc_df$col[rows] + 1
+    rows = loc_df$col == .col & loc_df$in_cell_pos > 1
+    loc_df$col[rows] = loc_df$col[rows] + 1
+  }
+  if (any(col_df$sep_num>2)) loc_df = split_multi_cell_cols(loc_df, sep_all=sep_all)
+  loc_df$max.col = max(loc_df$col)
+  loc_df
+}
+
+merge_single_neg_int_cols = function(loc_df) {
+  #restore.point("merge_single_neg_int_cols")
+  # Columns like 2005-2012 in header are sometimes wrongly split
+  mod_df = loc_df %>%
+    group_by(col) %>%
+    mutate(
+      num_in_col = n(),
+      num_neg_int_in_col = sum(num_deci==0 & num < 0)
+    )
+  inds = which(mod_df$num_in_col==1 & mod_df$num_neg_int_in_col==1)
+  if (length(inds)==0) return(loc_df)
+
+  restore.point("merge_single_neg_int_cols2")
+  #stop()
+  i = inds[2]
+  i = max(inds)
+  for (i in rev(inds)) {
+    row = loc_df$row[i]
+    col = loc_df$col[i]
+    left_ind = which(loc_df$row==row & loc_df$col == col-1)
+    temp = loc_df[c(left_ind, i),]
+    if (!length(left_ind)==1) next
+    if (is.true(loc_df$num_deci[left_ind]>0)) next
+    loc_df$text[left_ind] = paste0(loc_df$text[left_ind], loc_df$text[i])
+    loc_df$type[left_ind] = "text"
+    loc_df[left_ind, c("num_str","num","num_deci","paren_type")] = NA
+    loc_df$end[left_ind] = loc_df$end[i]
+    rows = loc_df$col > col
+    loc_df$col[rows] = loc_df$col[rows]-1
+    loc_df = loc_df[-i,,drop=FALSE]
+  }
+  loc_df$max.col = max(loc_df$col)
+  loc_df
+}
 
 # Unfortunatley the PDF to text converter does not put always
 # all cells of a pdf column exactly below each other. Such slips

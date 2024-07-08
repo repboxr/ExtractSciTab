@@ -639,7 +639,7 @@ repair_slipped_cols = function(loc_df) {
   header.row = unique(header$row)
   # We don't know how to deal with multiple int header rows
   if (length(header.row)>1) {
-    repbox_problem(msg="A table panels seems to have multiple header rows of the form (1) (2) (3) ... We do not yet know how to deal with it. Look at the code!",type="art_tab_mult_header")
+    cat("\nA table seems to have multiple header rows of the form (1) (2) (3) ... We do not yet know how to deal with it for repairing column slips.")
     return(loc_df)
   }
 
@@ -790,39 +790,6 @@ find_stars_str = function(big_str) {
   right_str =  substring(big_str,digit_pos+1)
   right_str = gsub(" ", "", right_str)
   as.vector(stringi::stri_match_first_regex(right_str, "[*]+")) %>% na.val("")
-}
-
-art_save_repdb_tab = function(project_dir, tab_df) {
-  restore.point("save_repdb_art_tab")
-  library(repboxDB)
-
-  artid = basename(project_dir)
-  tab_df = tab_df %>% mutate(
-    artid = artid,
-    tabpos = tab_counter,
-    num_panels = NROW(panel_df)
-
-  )
-
-  if (!has.col(tab_df,"tabnotes")) {
-    tab_df$tabnotes = NA_character_
-  }
-
-  repdb_check_data(tab_df, "art_tab_source")
-  repdb_check_data(tab_df, "art_tab")
-  cell_df = bind_rows_with_parent_fields(tab_df, "cell_df",c("artid","tabid"))
-
-  # Non-0 cellid will only be assigned to "num" cells
-  cell_df$cellid = cumsum(cell_df$type=="num") * (cell_df$type=="num")
-
-  repdb_check_data(cell_df, "art_tab_cell")
-
-
-  parcels = list(art_tab = list(art_tab=tab_df), art_tab_cell=list(art_tab_cell=cell_df), art_tab_source = list(art_tab_source=tab_df))
-  repdb_save_parcels(parcels, file.path(project_dir, "repdb"))
-
-  parcels
-
 }
 
 

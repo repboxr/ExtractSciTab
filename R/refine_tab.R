@@ -426,6 +426,8 @@ tp_to_cell_df = function(tp, word_loc, add_words_below=FALSE, panel_num=0) {
                    send + ceiling( (lead(sstart)-send) / 2 )
       )
     ) %>%
+    # Added to avoid rare bug... need to check in more detail
+    filter(end >= start) %>%
     select(col, col_start=start,col_end=end)
   col_df$col_end[NROW(col_df)] = col_df$col_end[NROW(col_df)]+1000
 

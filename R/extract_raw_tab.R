@@ -106,8 +106,11 @@ make.loc.line.df = function(txt) {
   re.big = paste0(re.paren.left,fp,"[ ]?",perc,stars,"?",re.paren.right,one.star,stars,"?")
   re.with.space = paste0("[ ]*", re.big,"[ ]*")
 
-  loc.df = stri_locate_all_regex(txt, re.with.space)[[1]] %>%
+  loc.df = stri_locate_all_regex(txt, re.with.space, omit_no_match = TRUE)[[1]] %>%
     loc_to_df(txt,.)
+
+  if (NROW(loc.df)==0) return(NULL)
+
 
   # Mark braces and remove fake numbers that either just open
   # or just close the brace.
